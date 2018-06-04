@@ -24,7 +24,11 @@ class UpgradeConf:
         self.PASSWORD = config.get('remote', 'password')
         self.WEBAPP_PATH = config.get('remote', 'webapp_path')
         self.UPGRADE_PATH = config.get('remote', 'pre_upgrade_path')
-        self.LOG_PATH = config.get('remote', 'app_log_path')
+
+        app_log_date = config.get('remote', 'app_log_date')
+        shop_id = config.get('global', 'shop_id')
+        self.LOG_PATH = config.get('remote', 'app_log_path').replace('{date}', app_log_date).replace('{shop_id}',
+                                                                                                     shop_id)
         self.LOCAL_UPGRADE_FILE = config.get('local', 'project_dir')
         self.IP_LIST = config.get('remote', 'hostname').split(',')
         self.backup_commend = "cd /app && cp -r webapp/{PROJECT_NAME} " + BACKUP_PATH \
@@ -48,39 +52,7 @@ class UpgradeConf:
         pass
 
 
-def backup_file(conf, ip):
-    print("***************backup file start***************")
-    for p in conf.project_list:
-        commend = conf.backup_commend.replace("{PROJECT_NAME}", p.name).replace("{BACKUP_PROJECT}", p.backupFile)
-        _execute_command(ip, conf, commend)
-    print("***************backup file end***************\n")
-
-
-def rm_file(conf, isAll):
-    print("***************rm file start***************")
-    for ip in conf.IP_LIST:
-        for p in conf.project_list:
-            if isAll:
-                commend = conf.rm_file_commend.replace("{BACKUP_PROJECT}", p.backupFile)
-            else:
-                commend = conf.rm_file_commend.replace("{BACKUP_PROJECT}", p.backupFile)
-                commend = os.path.join(commend, conf.WEB_INF, "classes/com")
-            _execute_command(ip, conf, commend)
-    print("***************rm file end***************\n")
-
-
-def _execute_command(ip, conf, commend):
-    print("execute_command host start: ", ip)
-    print("commend:", commend)
-    with paramiko.SSHClient() as ssh:
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(ip, conf.PORT, conf.USER, conf.PASSWORD)
-        stdin, stdout, stderr = ssh.exec_command(commend)
-        print(stdout.read())
-    print("execute_command host end: ", ip)
-
-
-def shh_put_all_by_pysftp(local_file_obj, sftp):
+def upload_upgrade_file(local_file_obj, sftp):
     print(local_file_obj)
     children = os.listdir(local_file_obj.localPath)
     for child in children:
@@ -104,13 +76,6 @@ def _upload_dir(local_path, local_file_obj, sftp):
             print('remote mkdir : ', remote_file_path)
             sftp.mkdir(remote_file_path)
 
-        # try:
-        #     remote_file_list = sftp.listdir(remote_file_path)
-        #     print('remote list dir:', remote_file_list)
-        # except:
-        #     print('remote mkdir : ', remote_file_path)
-        #     sftp.mkdir(remote_file_path)
-
         for file in walker[2]:
             if file.endswith('.DS_Store'):
                 continue
@@ -130,22 +95,12 @@ def _upload_file(local_file, local_file_obj, sftp):
     sftp.put(local_file, remote_file)
 
 
-def upload_upgrade_file(conf, ip):
-    print('***************ip:', ip, " start upload***************")
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        for local_file in conf.project_list:
-            shh_put_all_by_pysftp(local_file, sftp)
-    print('***************ip:', ip, " end upload***************\n")
-    pass
-
-
 def get_app_log_from_server(conf, ip):
     # remote_log_path = '/logs/applog/2018-05-29/jcdyx_011'
-    remote_log_path = '/logs/applog/2018-05-24/jtest1_1001'
-    local_path = '/Users/luohui/Desktop/applog/jtest1_1001'
+    local_path = '/Users/xx/Desktop/applog/jtest1_1001'
     print('***************ip:', ip, " start upload***************")
     with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        get_file(sftp, remote_log_path, local_path)
+        get_file(sftp, conf.LOG_PATH, local_path)
     print('***************ip:', ip, " end upload***************\n")
     pass
 
@@ -169,49 +124,48 @@ def get_file(sftp, remote_path, local_path):
         return
 
 
-def cp_file_to_webapp(conf, ip):
+def cp_file_to_webapp(project, conf, sftp):
     print('***************cp upgrade file to normal***************')
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        for local_file in conf.project_list:
-            remote_file_list = sftp.listdir(local_file.remoteTargetPath)
-            for file in remote_file_list:
-                commend = 'cp -r ' + os.path.join(conf.UPGRADE_PATH, local_file.backupFile, file) + " " + os.path.join(
-                    conf.WEBAPP_PATH, local_file.name)
-                print(commend)
-                sftp.execute(commend)
+    remote_file_list = sftp.listdir(project.remoteTargetPath)
+    for file in remote_file_list:
+        commend = 'cp -r ' + os.path.join(conf.UPGRADE_PATH, project.backupFile, file) + " " + os.path.join(
+            conf.WEBAPP_PATH, project.name)
+        print(commend)
+        sftp.execute(commend)
     print('***************cp upgrade file to normal***************\n')
     pass
 
 
-def cp_file_to_tomcat(conf, ip):
-    print('***************cp config file to tomcat***************')
+def restart_remote_server(sftp):
+    commend = '/app/tomcat/bin/shutdown.sh'
+    print(sftp.execute(commend))
+    time.sleep(3)
+    commend = '/bin/bash /app/tomcat/bin/startup.sh'
+    print(sftp.execute(commend))
+    commend = 'ps -ef | grep tomcat'
+    print(sftp.execute(commend))
+
+
+def backup_file(sftp, backup_commend, project):
+    print("***************backup file start***************")
+    commend = backup_commend.replace("{PROJECT_NAME}", project.name).replace("{BACKUP_PROJECT}", project.backupFile)
+    sftp.execute(commend)
+    print("***************backup file end***************\n")
+
+
+def upgrade(conf, ip):
     with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        print(ip + "-- > 连接成功")
-        print(sftp.put(conf.LOCAL_UPGRADE_FILE + '/catalina.sh', '/app/tomcat/bin/catalina.sh'))
-    print('***************cp config file to tomcat***************\n')
-    pass
-
-
-def get_file_from_tomcat(conf, ip):
-    print('***************cp config file to tomcat***************')
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        print(ip + "-- > 连接成功")
-        print(sftp.get('/app/tomcat/bin/catalina.sh', conf.LOCAL_UPGRADE_FILE + '/catalina.sh'))
-    print('***************cp config file to tomcat***************\n')
-    pass
-
-
-def restart_remote_server(conf, ip):
-    print('***************restart remote(' + ip + ') server start***************')
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        commend = '/app/tomcat/bin/shutdown.sh'
-        print(sftp.execute(commend))
-        time.sleep(3)
-        commend = '/bin/bash /app/tomcat/bin/startup.sh'
-        print(sftp.execute(commend))
-        commend = 'ps -ef | grep tomcat'
-        print(sftp.execute(commend))
-    print('***************restart remote(' + ip + ') server end***************\n')
+        for project in conf.project_list:
+            # 备份文件
+            backup_file(sftp, conf.backup_commend, project)
+            # 将待升级文件上传至upgrade文件中
+            upload_upgrade_file(project, sftp)
+            # 将待升级文件copy至正式文件
+            cp_file_to_webapp(project, conf, sftp)
+        print('***************restart remote(' + ip + ') server start***************')
+        # 重启服务器
+        restart_remote_server(sftp)
+        print('***************restart remote(' + ip + ') server end***************\n')
 
 
 def main():
@@ -219,16 +173,9 @@ def main():
     IP_List = upgrade_conf.IP_LIST
     with futures.ProcessPoolExecutor() as executor:
         for ip in IP_List:
-            # 备份文件
-            executor.submit(backup_file, upgrade_conf, ip)
-            # 将待升级文件上传至upgrade文件中
-            # executor.submit(upload_upgrade_file, upgrade_conf, ip)
-            # 将待升级文件copy至正式文件
-            # executor.submit(cp_file_to_webapp, upgrade_conf, ip)
-            # 重启服务器
-            # executor.submit(restart_remote_server, upgrade_conf, ip)
-            # 下载日志
-            # executor.submit(get_app_log_from_server, upgrade_conf, ip)
+            executor.submit(upgrade, upgrade_conf, ip)
+    ip = '192.169.0.19'
+    get_app_log_from_server(upgrade_conf, ip)
 
 
 if __name__ == '__main__':
