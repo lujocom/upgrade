@@ -53,8 +53,7 @@ def backup_file(conf, ip):
     print("***************backup file start***************")
     for p in conf.project_list:
         commend = conf.backup_commend.replace("{PROJECT_NAME}", p.name).replace("{BACKUP_PROJECT}", p.backupFile)
-        print(commend)
-        # _execute_command(ip, conf.USER, conf.PASSWORD, commend)
+        _execute_command(ip, conf, commend)
     print("***************backup file end***************\n")
 
 
@@ -67,7 +66,7 @@ def rm_file(conf, isAll):
             else:
                 commend = conf.rm_file_commend.replace("{BACKUP_PROJECT}", p.backupFile)
                 commend = os.path.join(commend, conf.WEB_INF, "classes/com")
-            _execute_command(ip, conf.USER, conf.PASSWORD, commend)
+            _execute_command(ip, conf, commend)
     print("***************rm file end***************\n")
 
 
