@@ -14,21 +14,20 @@ Project = namedtuple("Project", "name backupFile localPath remoteTargetPath")
 class UpgradeConf:
 
     def __init__(self, config_file_name):
-        self.__config_file_name = config_file_name
         config = configparser.ConfigParser()
         config.read(config_file_name)
+        BACKUP_PATH = config.get('remote', 'backup_path')
+        upgrade_project = config.get('global', 'project_name').split(',')
+
         self.PORT = config.get('remote', 'port')
         self.USER = config.get('remote', 'username')
         self.PASSWORD = config.get('remote', 'password')
         self.WEBAPP_PATH = config.get('remote', 'webapp_path')
         self.UPGRADE_PATH = config.get('remote', 'pre_upgrade_path')
-        self.BACKUP_PATH = config.get('remote', 'backup_path')
         self.LOG_PATH = config.get('remote', 'app_log_path')
         self.LOCAL_UPGRADE_FILE = config.get('local', 'project_dir')
         self.IP_LIST = config.get('remote', 'hostname').split(',')
-
-        self.upgrade_project = config.get('global', 'project_name').split(',')
-        self.backup_commend = "cd /app && cp -r webapp/{PROJECT_NAME} " + self.BACKUP_PATH \
+        self.backup_commend = "cd /app && cp -r webapp/{PROJECT_NAME} " + BACKUP_PATH \
                               + "/{BACKUP_PROJECT} && cp -r webapp/{PROJECT_NAME} " \
                               + self.UPGRADE_PATH + "/{BACKUP_PROJECT}"
 
@@ -40,7 +39,7 @@ class UpgradeConf:
         year = str(current_date.year)
         day = str(current_date.month).zfill(2) + str(current_date.day)
         self.project_list = []
-        for up in self.upgrade_project:
+        for up in upgrade_project:
             backup_file_name = up + "-" + year + "-" + day
             project = Project(up, backup_file_name, os.path.join(self.LOCAL_UPGRADE_FILE, up),
                               os.path.join(self.UPGRADE_PATH, backup_file_name))
