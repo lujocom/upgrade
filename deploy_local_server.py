@@ -41,10 +41,11 @@ class UpgradeConf:
 
         current_date = datetime.datetime.now()
         year = str(current_date.year)
-        day = str(current_date.month).zfill(2) + str(current_date.day)
+        day = str(current_date.month).zfill(2) + str(current_date.day).zfill(2)
+        hour = str(current_date.hour).zfill(2) + str(current_date.minute).zfill(2)
         self.project_list = []
         for up in upgrade_project:
-            backup_file_name = up + "-" + year + "-" + day
+            backup_file_name = up + "-Root-" + year + "-" + day + "-" + hour
             project = Project(up, backup_file_name, os.path.join(self.LOCAL_UPGRADE_FILE, up),
                               os.path.join(self.UPGRADE_PATH, backup_file_name))
             self.project_list.append(project)
@@ -95,47 +96,6 @@ def _upload_file(local_file, local_file_obj, sftp):
     sftp.put(local_file, remote_file)
 
 
-def get_app_log_from_server(conf, ip):
-    # remote_log_path = '/logs/applog/2018-05-29/jcdyx_011'
-    local_path = '/Users/xx/Desktop/applog/jtest1_1001'
-    print('***************ip:', ip, " start upload***************")
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        get_file(sftp, conf.LOG_PATH, local_path)
-    print('***************ip:', ip, " end upload***************\n")
-    pass
-
-
-def get_file(sftp, remote_path, local_path):
-    if sftp.isdir(remote_path):
-        if not os.path.exists(local_path):
-            os.mkdir(local_path)
-        remote_path_list = sftp.listdir(remote_path)
-        print(remote_path_list)
-        for path in remote_path_list:
-            remote_file = os.path.join(remote_path, path)
-            local_file = os.path.join(local_path, path)
-            print('remote path : ', remote_file)
-            print('local path : ', local_file)
-            get_file(sftp, remote_file, local_file)
-    if sftp.isfile(remote_path):
-        print('get from ', remote_path, " to ", local_path)
-        print(sftp.get(remote_path, local_path))
-        print()
-        return
-
-
-def cp_file_to_webapp(project, conf, sftp):
-    print('***************cp upgrade file to normal***************')
-    remote_file_list = sftp.listdir(project.remoteTargetPath)
-    for file in remote_file_list:
-        commend = 'cp -r ' + os.path.join(conf.UPGRADE_PATH, project.backupFile, file) + " " + os.path.join(
-            conf.WEBAPP_PATH, project.name)
-        print(commend)
-        sftp.execute(commend)
-    print('***************cp upgrade file to normal***************\n')
-    pass
-
-
 def restart_remote_server(sftp):
     commend = '/app/tomcat/bin/shutdown.sh'
     print(sftp.execute(commend))
@@ -153,29 +113,47 @@ def backup_file(sftp, backup_commend, project):
     print("***************backup file end***************\n")
 
 
+def cp_file_to_webapp(project, conf, sftp):
+    print('***************cp upgrade file to normal***************')
+    remote_file_list = sftp.listdir(project.remoteTargetPath)
+    for file in remote_file_list:
+        commend = 'cp -r ' + os.path.join(conf.UPGRADE_PATH, project.backupFile, file) + " " + os.path.join(
+            conf.WEBAPP_PATH, project.name)
+        print(commend)
+        sftp.execute(commend)
+    print('***************cp upgrade file to normal***************\n')
+    pass
+
+
 def upgrade(conf, ip):
-    with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
-        for project in conf.project_list:
-            # 备份文件
-            backup_file(sftp, conf.backup_commend, project)
-            # 将待升级文件上传至upgrade文件中
-            upload_upgrade_file(project, sftp)
-            # 将待升级文件copy至正式文件
-            cp_file_to_webapp(project, conf, sftp)
-        print('***************restart remote(' + ip + ') server start***************')
-        # 重启服务器
-        restart_remote_server(sftp)
-        print('***************restart remote(' + ip + ') server end***************\n')
+    print("ip:", ip, "-start")
+    try:
+        with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
+            for project in conf.project_list:
+                # 备份文件
+                backup_file(sftp, conf.backup_commend, project)
+                # 将待升级文件上传至upgrade文件中
+                upload_upgrade_file(project, sftp)
+                # 复制文件
+                cp_file_to_webapp(project, conf, sftp)
+            # print('***************restart remote(' + ip + ') server start***************')
+            # # 重启服务器
+            # restart_remote_server(sftp)
+            # print('***************restart remote(' + ip + ') server end***************\n')
+    except BaseException as e:
+        print(e)
+
+    print("ip:", ip, "-end")
 
 
 def main():
-    upgrade_conf = UpgradeConf('upgrade.ini')
+    upgrade_conf = UpgradeConf('deploy-local.ini')
     IP_List = upgrade_conf.IP_LIST
     with futures.ProcessPoolExecutor() as executor:
         for ip in IP_List:
             executor.submit(upgrade, upgrade_conf, ip)
-    ip = '192.169.0.19'
-    get_app_log_from_server(upgrade_conf, ip)
+    # ip = '192.169.0.19'
+    # get_app_log_from_server(upgrade_conf, ip)
 
 
 if __name__ == '__main__':
