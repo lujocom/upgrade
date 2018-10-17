@@ -7,8 +7,11 @@ from concurrent import futures
 import paramiko, os
 from collections import namedtuple
 import pysftp
+import json
 
 Project = namedtuple("Project", "name backupFile localPath remoteTargetPath")
+
+shopIdList = []
 
 
 class UpgradeConf:
@@ -25,12 +28,9 @@ class UpgradeConf:
         self.WEBAPP_PATH = config.get('remote', 'webapp_path')
         self.UPGRADE_PATH = config.get('remote', 'pre_upgrade_path')
 
-        app_log_date = config.get('remote', 'app_log_date')
-        shop_id = config.get('global', 'shop_id')
-        self.LOG_PATH = config.get('remote', 'app_log_path').replace('{date}', app_log_date).replace('{shop_id}',
-                                                                                                     shop_id)
+        self.shopIdList = config.get('global', 'shop_id').split(',')
+
         self.LOCAL_UPGRADE_FILE = config.get('local', 'project_dir')
-        self.IP_LIST = config.get('remote', 'hostname').split(',')
         self.backup_commend = "cd /app && cp -r webapp/{PROJECT_NAME} " + BACKUP_PATH \
                               + "/{BACKUP_PROJECT} && cp -r webapp/{PROJECT_NAME} " \
                               + self.UPGRADE_PATH + "/{BACKUP_PROJECT}"
@@ -51,6 +51,12 @@ class UpgradeConf:
             self.project_list.append(project)
 
         pass
+
+
+def get_ip_config(file_name):
+    with open(file_name, 'r', encoding='utf8') as f:
+        data = json.load(f)
+        return data
 
 
 def upload_upgrade_file(local_file_obj, sftp):
@@ -125,10 +131,13 @@ def cp_file_to_webapp(project, conf, sftp):
     pass
 
 
-def upgrade(conf, ip):
-    print("ip:", ip, "-start")
+def upgrade(conf, ip_config):
+    print("ip:", ip_config, "-start")
     try:
-        with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
+        cnopts = pysftp.CnOpts()
+        cnopts.hostkeys = None
+        with pysftp.Connection(host=ip_config['ip'], username=conf.USER, password=conf.PASSWORD, cnopts=cnopts) as sftp:
+            # with pysftp.Connection(ip, username=conf.USER, password=conf.PASSWORD) as sftp:
             for project in conf.project_list:
                 # 备份文件
                 backup_file(sftp, conf.backup_commend, project)
@@ -136,6 +145,8 @@ def upgrade(conf, ip):
                 upload_upgrade_file(project, sftp)
                 # 复制文件
                 cp_file_to_webapp(project, conf, sftp)
+
+                # sftp.excute("rm -rf /app/webapp/portal/WEB-INF/classes/com/xcalculas/portal/controller")
             # print('***************restart remote(' + ip + ') server start***************')
             # # 重启服务器
             # restart_remote_server(sftp)
@@ -143,15 +154,25 @@ def upgrade(conf, ip):
     except BaseException as e:
         print(e)
 
-    print("ip:", ip, "-end")
+    print("ip:", ip_config, "-end \n")
 
 
 def main():
+    ip_map = get_ip_config("deploy_local.json")
     upgrade_conf = UpgradeConf('deploy-local.ini')
-    IP_List = upgrade_conf.IP_LIST
-    with futures.ProcessPoolExecutor() as executor:
-        for ip in IP_List:
-            executor.submit(upgrade, upgrade_conf, ip)
+    shopIdList = upgrade_conf.shopIdList
+    del upgrade_conf.shopIdList
+
+    for shopId in shopIdList:
+        upgrade(upgrade_conf, ip_map[shopId])
+
+    # with futures.ProcessPoolExecutor() as executor:
+    #     for ip_config in IP_List:
+    #         executor.submit(upgrade, upgrade_conf, ip_config)
+
+    # for ip_config in IP_List:
+    #
+
     # ip = '192.169.0.19'
     # get_app_log_from_server(upgrade_conf, ip)
 
